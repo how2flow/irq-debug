@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
+/*
+ * Copyright (C) Steve Jeong <steve@how2flow.net>
+ *
+ * ARM GICv3 runtime trigger test devices (LPI / SPI / ...).
+ *
+ * Pairs with drivers/misc/irq-test/irq-test-*.c.
+ * Include from a board DTS only when bring-up testing of GIC interrupts
+ * is needed.
+ */
+
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	spi_test0: spi-test {
+		compatible = "arm,gic-v3-spi-test";
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 700 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	its_test0: its-test {
+		compatible = "arm,gic-v3-its-test";
+		msi-parent = <&its0 0x1>;
+	};
+};

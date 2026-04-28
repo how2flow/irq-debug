@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
+/*
+ * Copyright (C) Steve Jeong <steve@how2flow.net>
+ *
+ * ARM GICv3 latency benchmark devices (LPI / SPI).
+ *
+ * Pairs with drivers/misc/irq-bench/irq-bench-*.c.
+ * Include from a board DTS only when latency benchmarking is needed.
+ */
+
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	spi_bench0: spi-bench {
+		compatible = "arm,gic-v3-spi-bench";
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 701 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	its_bench0: its-bench {
+		compatible = "arm,gic-v3-its-bench";
+		msi-parent = <&its0 0x2>;
+	};
+};
