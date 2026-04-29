@@ -1,0 +1,14 @@
+/* Append to apps/soc-test/src/soc/ip/gicv3.h, inside the existing block */
+
+#define GICD_ISENABLER            0x100
+#define GICD_ISPENDR              0x200
+#define GICD_ICPENDR              0x280
+#define GICD_ICFGR                0xC00
+
+/*
+ * GICD_ICFGR encoding (per INTID, 2 bits at offset 2*(INTID%16)):
+ *   bit[2N+1] = trigger type (0 = level-sensitive, 1 = edge-triggered)
+ *   bit[2N]   = reserved (RAZ/WI)
+ */
+#define GICD_ICFGR_LEVEL          0x0    /* 0b00 */
+#define GICD_ICFGR_EDGE           0x2    /* 0b10 */

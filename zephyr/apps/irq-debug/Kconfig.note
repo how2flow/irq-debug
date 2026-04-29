@@ -1,0 +1,16 @@
+# Edits required in apps/soc-test/Kconfig
+#
+# 1. Add `select DYNAMIC_INTERRUPTS` under SOC_TEST_GIC:
+#
+#    config SOC_TEST_GIC
+#        bool "GIC verification tests"
+#        default n
+#        select DYNAMIC_INTERRUPTS    <-- add this line
+#
+# 2. Remove the entire SOC_TEST_IRQ block (no longer used; the IRQ tests
+#    were merged into test_gic.c):
+#
+#    -config SOC_TEST_IRQ
+#    -    bool "Interrupt verification tests"
+#    -    default n
+#    -    select DYNAMIC_INTERRUPTS

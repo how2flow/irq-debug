@@ -1,0 +1,9 @@
+# Replace the existing CONFIG_NUM_IRQS line in your target's BL2-style
+# board defconfig (boards/<vendor>/<target>/<board>_bl2_defconfig).
+#
+# Apply to every defconfig that runs the gic_spi tests (one BL2 defconfig
+# per SoC variant). The bumped value of 992 covers INTID 732 (SPI 700)
+# with margin for additional SPIs without hitting the standard SPI ceiling
+# of INTID 1019.
+
+CONFIG_NUM_IRQS=992

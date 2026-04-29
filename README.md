@@ -1,10 +1,18 @@
 # irq-debug
 
-Kernel patches for runtime SW injection and latency benchmarking of ARM
-GICv3 interrupts. Replaces JTAG-based workflows (writing INT/INV directly
-into the ITS commandq, or poking GICD_ISPENDR) with simple debugfs writes.
+Patches for runtime SW injection and latency benchmarking of ARM GICv3
+interrupts. Replaces JTAG-based workflows (writing INT/INV directly into
+the ITS commandq, or poking GICD_ISPENDR) with simple host-driven writes.
 
-Two consumer drivers share a small framework:
+Two delivery targets are mirrored here:
+
+- `linux/` — Linux kernel modules under `drivers/misc/irq-debug/` providing
+  debugfs interfaces (`trigger`, `run`, `info`, `affinity`, …).
+- `zephyr/` — Zephyr soc-test patches that add the same SPI / LPI trigger
+  coverage as auto-running tests (no debugfs; tests run on boot and print
+  PASS / FAIL / SKIP).
+
+The Linux side has two consumer drivers sharing a small framework:
 
 - **irq-test** — fires N interrupts, verifies handler invocation count.
 - **irq-bench** — measures dispatch latency (ktime) over N iterations,
@@ -281,3 +289,139 @@ Type-specific files planned under `irq-test/` and `irq-bench/`:
 | SGI | not feasible via standard DT (reserved for IPI infrastructure) |
 
 `irq-debug.c` (framework) is reused unchanged across all consumers.
+
+---
+
+# Zephyr target
+
+Patches that add the same SPI / LPI trigger coverage to a bare-metal
+Zephyr build. Tests run automatically on boot and print PASS / FAIL /
+SKIP — there is no debugfs, shell, or interactive surface in this target.
+
+## Prerequisite (out of scope for this mirror)
+
+The Zephyr side assumes a downstream **soc-test–style test framework**
+already present in the consumer's tree. No such framework exists in
+upstream Zephyr; the consumer is expected to carry their own (under
+`apps/`, `samples/`, or wherever fits their layout). The mirrored
+`apps/irq-debug/` directory is a placeholder for that path.
+
+The framework is expected to provide at minimum:
+
+```c
+enum soc_test_result { SOC_TEST_PASS = 0, SOC_TEST_FAIL, SOC_TEST_SKIP };
+
+#define SOC_TEST_DEFINE(name, group, fn, flags)        /* register a test */
+#define SOC_TEST_FLAG_NONE              0
+#define SOC_TEST_FLAG_SKIP_EMULATOR     BIT(0)
+/* ...other platform skip flags as desired... */
+
+#define SOC_TEST_CHECK(cond, msg)       /* return SOC_TEST_FAIL on miss */
+#define SOC_TEST_CHECK_EQ(a, b, msg)
+#define SOC_TEST_REG_RD32(addr)         /* sys_read32 wrapper */
+#define SOC_TEST_REG_WR32(addr, v)      /* sys_write32 wrapper */
+
+/* SoC abstraction: per-SoC header maps SOC_GICD_BASE etc. via Kconfig. */
+extern <soc_regs.h>;
+```
+
+If the consumer's framework uses different macro / enum names, adapt
+`test_gic.c` to match — the test logic itself is framework-agnostic.
+
+## Layout
+
+```
+zephyr/
+├── apps/irq-debug/                      # = consumer's soc-test-equivalent path
+│   ├── Kconfig.note                    # edits to its Kconfig
+│   ├── CMakeLists.txt.note             # edits to its CMakeLists.txt
+│   └── src/
+│       ├── soc/ip/gicv3.h.add          # GICD_ISPENDR/ICFGR offsets to append
+│       └── tests/test_gic.c            # full file (replaces test_gic.c +
+│                                         absorbs deleted test_irq.c)
+└── boards/vendor/target/
+    └── board_defconfig.add             # CONFIG_NUM_IRQS bump (apply per BL2 board)
+```
+
+Path placeholders:
+
+- `apps/irq-debug/` — placeholder for your downstream framework's
+  directory. The name matches the project (`drivers/misc/irq-debug/` on
+  the Linux side) for consistency only; the consumer's actual directory
+  can be called anything (`apps/soc-test/`, `apps/<my-tests>/`, etc.).
+- `boards/vendor/target/` — your SoC vendor and target name as used by
+  the Zephyr `boards/<vendor>/<target>/` convention.
+- `board_defconfig.add` — replace the existing `CONFIG_NUM_IRQS=...`
+  line in every BL2-style board defconfig that runs the gic_spi tests.
+
+What's tracked:
+
+- **Full files** (`test_gic.c`): semantically rewritten / new content,
+  copy-paste replaces target.
+- **`.add` snippets** (`gicv3.h.add`, `board_defconfig.add`): small
+  appendages or single-line replacements.
+- **`.note` files** (`Kconfig.note`, `CMakeLists.txt.note`): structural
+  edits described in plain text — apply by hand.
+- **Deletion**: `<your-app>/src/tests/test_irq.c` is removed; its CNTV
+  virtual-timer tests moved into `test_gic.c` under the `gic` group.
+
+## Tests added
+
+| Item | Trigger | Status in BL2 (S-EL1) |
+|---|---|---|
+| `gic_typer` | distributor TYPER readback | PASS |
+| `gic_iidr` | distributor IIDR readback | PASS |
+| `gic_ppi` / `_repeated` | CNTV (PPI 11) — moved from test_irq.c | PASS (silicon) |
+| `gic_spi` / `_repeated` | direct GICD_ISPENDR write on INTID 732 (SPI 700) | PASS |
+| `gic_lpi` / `_repeated` | upstream ITS API: `its_send_int()` on LPI INTID 8192 | SKIP (gated by `CONFIG_GIC_V3_ITS`, which forces NS) |
+
+LPI is the only entry that depends on a Non-secure build; the stub
+returns `SOC_TEST_SKIP` so the entry stays visible in the run-time
+output without dragging NUM_IRQS / DT / heap requirements into BL2.
+
+The LPI path uses Zephyr's upstream GICv3 ITS driver (`CONFIG_GIC_V3_ITS`)
+through `its_setup_deviceid()` / `its_map_intid()` / `its_send_int()`.
+No custom ITS bring-up code is added.
+
+## Adjacent BSP changes (not mirrored here)
+
+If your BSP / Yocto layer carries kernel-config fragments that pin
+`CONFIG_SOC_TEST_IRQ=y` (or the equivalent symbol used by an older
+test-framework Kconfig) plus `CONFIG_DYNAMIC_INTERRUPTS=y`, drop those
+lines once the Zephyr-side Kconfig stops defining `SOC_TEST_IRQ`.
+Otherwise Kconfig escalates the unknown symbol to a build error.
+
+Typical fragment locations vary per layer; search the BSP for any
+`*_soc_test.conf` (or similarly named) file that asserts `SOC_TEST_IRQ`.
+The exact paths are vendor-specific and outside this mirror's scope.
+
+## Apply
+
+From the target Zephyr tree root:
+
+```bash
+IRQ_USER=irq-debug/zephyr
+APP=<your-app-dir>                  # path to your test-framework app
+BOARD_DEFCONFIG=<path-to-bl2-defconfig>
+
+# 1. Replace test_gic.c, delete test_irq.c
+cp $IRQ_USER/apps/irq-debug/src/tests/test_gic.c   ./$APP/src/tests/test_gic.c
+rm -f ./$APP/src/tests/test_irq.c
+
+# 2. Append the GICD register offsets to gicv3.h, then move them inside
+#    the existing #ifndef block.
+cat $IRQ_USER/apps/irq-debug/src/soc/ip/gicv3.h.add >> ./$APP/src/soc/ip/gicv3.h
+${EDITOR:-vi} ./$APP/src/soc/ip/gicv3.h
+
+# 3. Apply the Kconfig and CMakeLists edits per the .note files
+${EDITOR:-vi} ./$APP/Kconfig            # follow Kconfig.note
+${EDITOR:-vi} ./$APP/CMakeLists.txt     # follow CMakeLists.txt.note
+
+# 4. Bump CONFIG_NUM_IRQS in every BL2-style board defconfig that runs
+#    gic_spi tests (single-line replacement per board_defconfig.add).
+${EDITOR:-vi} $BOARD_DEFCONFIG
+```
+
+If the consumer's BSP layer carries kernel-config fragments that touched
+`CONFIG_SOC_TEST_IRQ`, drop those lines too (see "Adjacent BSP changes"
+above).

@@ -1,0 +1,6 @@
+# Edit required in apps/soc-test/CMakeLists.txt
+#
+# Remove the test_irq.c entry (file is deleted; its tests were merged
+# into test_gic.c):
+#
+#   -target_sources_ifdef(CONFIG_SOC_TEST_IRQ     app PRIVATE src/tests/test_irq.c)
