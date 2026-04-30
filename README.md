@@ -219,6 +219,50 @@ cat /sys/kernel/debug/interrupts/lpi/its-test0/info
 # handler_cnt: 1001  ← must match
 ```
 
+#### LPI: ITS commandq wrap-around test
+
+`its-test*/wrap` runs a focused check that the ITS commandq survives
+multiple ring-buffer wraps. The test:
+
+1. reads `GITS_CBASER` once at probe (via `msi-parent → ITS DT node`)
+   to learn the ring size,
+2. submits **2 × ring_entries** INT commands (≥2 wraps guaranteed)
+   with per-iteration `wait_for_completion()` so handler invocations
+   are serialised and never coalesce,
+3. compares `handler_cnt` to `submit_cnt` and snapshots `GITS_CWRITER`
+   before/after — pass requires exact count match.
+
+```bash
+# Inspect ring info (added to 'info' once wrap is available)
+cat /sys/kernel/debug/interrupts/lpi/its-test0/info | grep ring_size:
+# ring_size:   65536 bytes (2048 entries)
+
+# Run the wrap check (writes any value to kick off, blocks until done)
+echo 1 > /sys/kernel/debug/interrupts/lpi/its-test0/wrap
+
+# Inspect verdict
+cat /sys/kernel/debug/interrupts/lpi/its-test0/wrap_result
+# ring_size:      65536 bytes
+# ring_entries:   2048
+# submit_cnt:     4096
+# handler_cnt:    4096
+# cwriter_before: 0x12340
+# cwriter_after:  0x12340
+# wraps_min:      2
+# verdict:        PASS
+```
+
+The test only writes through standard kernel APIs (`irq_set_irqchip_state`)
+and never touches the ITS commandq DRAM or `GITS_CWRITER` directly — the
+kernel ITS driver remains the sole writer, so kernel state stays
+consistent and the system does not need a reboot after the test.
+
+For a more invasive precision test (raw SYNC-fill to land exactly at
+the ring boundary, single command across the wrap, etc.) a JTAG/T32
+script with the CPU halted is the appropriate tool — that flow needs
+exclusive ring ownership which is unattainable from a running kernel
+module.
+
 ### irq-bench (latency measurement)
 
 ```bash
